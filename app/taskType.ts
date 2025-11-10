@@ -1,7 +1,9 @@
 // taskType.ts
 export interface Task {
-  id?: string;
+  id: string;
   title: string;
   description: string;
-  createdAt: string;
+  completed: boolean;
+  priority: "Low" | "Medium" | "High";
+  userEmail: string;
 }

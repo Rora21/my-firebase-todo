@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db, auth } from "../firebase"
+import { db, auth } from "../firebase";
 import {
   collection,
   addDoc,
@@ -9,102 +9,187 @@ import {
   deleteDoc,
   doc,
   updateDoc,
+  query,
+  where,
+  orderBy,
 } from "firebase/firestore";
 import { signOut } from "firebase/auth";
-import ProtectedRoute from "../ProtectedRoute"
-import { Task } from "../../taskType";
-import { useRouter } from "next/navigation";
+import ProtectedRoute from "../ProtectedRoute";
+import { Task } from "../taskType";
 
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const router = useRouter();
+  const [priority, setPriority] = useState<"Low" | "Medium" | "High">("Low");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState("");
 
+  // Get current user and listen to tasks
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, "tasks"), (snapshot) => {
+    const user = auth.currentUser;
+    if (user) setUserEmail(user.email || "");
+
+    // Firestore query: only tasks of this user
+    const q = query(
+      collection(db, "tasks"),
+      where("userEmail", "==", user?.email),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       })) as Task[];
       setTasks(data);
     });
+
     return () => unsubscribe();
   }, []);
 
-  const handleAdd = async () => {
-    if (!title) return;
-    await addDoc(collection(db, "tasks"), {
-      title,
-      description,
-      createdAt: new Date().toISOString(),
-    });
+  // Add or update task
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title || !description) return;
+
+    if (editId) {
+      // Update existing task
+      await updateDoc(doc(db, "tasks", editId), {
+        title,
+        description,
+        priority,
+      });
+      setEditId(null);
+    } else {
+      // Create new task
+      await addDoc(collection(db, "tasks"), {
+        title,
+        description,
+        priority,
+        completed: false,
+        userEmail,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     setTitle("");
     setDescription("");
+    setPriority("Low");
+  };
+
+  const handleEdit = (task: Task) => {
+    setTitle(task.title);
+    setDescription(task.description);
+    setPriority(task.priority);
+    setEditId(task.id || null);
   };
 
   const handleDelete = async (id: string) => {
     await deleteDoc(doc(db, "tasks", id));
   };
 
-  const handleUpdate = async (id: string, newTitle: string) => {
-    await updateDoc(doc(db, "tasks", id), { title: newTitle });
+  const toggleCompleted = async (task: Task) => {
+    await updateDoc(doc(db, "tasks", task.id!), {
+      completed: !task.completed,
+    });
   };
 
   const handleLogout = async () => {
     await signOut(auth);
-    router.push("/login");
+    window.location.href = "/login";
   };
 
   return (
     <ProtectedRoute>
-      <div className="p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-semibold">My Tasks</h2>
+      <div className="max-w-3xl mx-auto p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold">Hello, {userEmail}</h1>
           <button
             onClick={handleLogout}
-            className="bg-red-500 text-white px-3 py-1 rounded"
+            className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
           >
             Logout
           </button>
         </div>
 
-        <div className="flex gap-2 mb-6">
+        {/* Task Form */}
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col gap-2 mb-6 border p-4 rounded shadow-sm bg-white"
+        >
           <input
             type="text"
-            placeholder="Task title"
+            placeholder="Title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="border p-2 rounded w-1/3"
+            className="border p-2 rounded"
+            required
           />
           <input
             type="text"
             placeholder="Description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="border p-2 rounded w-1/2"
+            className="border p-2 rounded"
+            required
           />
-          <button
-            onClick={handleAdd}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          <select
+            value={priority}
+            onChange={(e) =>
+              setPriority(e.target.value as "Low" | "Medium" | "High")
+            }
+            className="border p-2 rounded"
           >
-            Add
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
+          </select>
+          <button
+            type="submit"
+            className="bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
+          >
+            {editId ? "Update Task" : "Add Task"}
           </button>
-        </div>
+        </form>
 
-        <ul>
+        {/* Task List */}
+        <ul className="space-y-2">
           {tasks.map((task) => (
             <li
               key={task.id}
-              className="flex justify-between items-center border-b py-2"
+              className="flex justify-between items-center p-3 border rounded bg-white"
             >
-              <div>
-                <strong>{task.title}</strong> – {task.description}
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={task.completed}
+                  onChange={() => toggleCompleted(task)}
+                  className="w-4 h-4"
+                />
+                <div>
+                  <p
+                    className={`font-semibold ${
+                      task.completed ? "line-through text-gray-400" : ""
+                    }`}
+                  >
+                    {task.title} ({task.priority})
+                  </p>
+                  <p className={task.completed ? "line-through text-gray-400" : ""}>
+                    {task.description}
+                  </p>
+                </div>
               </div>
               <div className="flex gap-2">
                 <button
+                  onClick={() => handleEdit(task)}
+                  className="text-blue-600 hover:underline"
+                >
+                  Edit
+                </button>
+                <button
                   onClick={() => handleDelete(task.id!)}
-                  className="text-red-500 hover:underline"
+                  className="text-red-600 hover:underline"
                 >
                   Delete
                 </button>
